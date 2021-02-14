@@ -938,6 +938,11 @@ class Benchmark {
   // in multiple threads.  This may be useful when measuring the scaling
   // of some piece of code.
 
+  // Like Threads(), but the timers are not aggregated. Each of the threads
+  // gets its own timer.
+  Benchmark* AsyncIO(int t);
+  Benchmark* AsyncIORange(int min_threads, int max_threads);
+
   // Run one instance of this benchmark concurrently in t threads.
   Benchmark* Threads(int t);
 
@@ -988,6 +993,7 @@ class Benchmark {
   bool measure_process_cpu_time_;
   bool use_real_time_;
   bool use_manual_time_;
+  bool use_async_io_;
   BigO complexity_;
   BigOFunc* complexity_lambda_;
   std::vector<Statistics> statistics_;
@@ -1418,6 +1424,12 @@ class BenchmarkReporter {
     double real_accumulated_time;
     double cpu_accumulated_time;
 
+    bool use_async_io;
+    std::vector<IterationCount> per_thread_iterations;
+    std::vector<double> per_thread_real_time;
+    std::vector<double> per_thread_cpu_time;
+    std::vector<UserCounters> per_thread_counters;
+
     // Return a value representing the real time per iteration in the unit
     // specified by 'time_unit'.
     // NOTE: If 'iterations' is zero the returned value represents the
@@ -1429,6 +1441,9 @@ class BenchmarkReporter {
     // NOTE: If 'iterations' is zero the returned value represents the
     // accumulated time.
     double GetAdjustedCPUTime() const;
+
+    std::vector<double> GetAdjustedRealTimes() const;
+    std::vector<double> GetAdjustedCPUTimes() const;
 
     // This is set to 0.0 if memory tracing is not enabled.
     double max_heapbytes_used;

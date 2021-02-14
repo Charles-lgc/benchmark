@@ -102,4 +102,28 @@ double BenchmarkReporter::Run::GetAdjustedCPUTime() const {
   return new_time;
 }
 
+std::vector<double> BenchmarkReporter::Run::GetAdjustedRealTimes() const {
+  std::vector<double> new_times;
+  int i = 0;
+  for (auto real_time : per_thread_real_time) {
+    double new_time = real_time * GetTimeUnitMultiplier(time_unit);
+    if (per_thread_iterations[i] != 0) new_time /= static_cast<double>(per_thread_iterations[i]);
+    new_times.push_back(new_time);
+    ++i;
+  }
+  return new_times;
+}
+
+std::vector<double> BenchmarkReporter::Run::GetAdjustedCPUTimes() const {
+  std::vector<double> new_times;
+  int i = 0;
+  for (auto cpu_time : per_thread_cpu_time) {
+    double new_time = cpu_time * GetTimeUnitMultiplier(time_unit);
+    if (per_thread_iterations[i] != 0) new_time /= static_cast<double>(per_thread_iterations[i]);
+    new_times.push_back(new_time);
+    ++i;
+  }
+  return new_times;
+}
+
 }  // end namespace benchmark

@@ -2,7 +2,7 @@
 #define BENCHMARK_THREAD_MANAGER_H
 
 #include <atomic>
-
+#include <vector>
 #include "benchmark/benchmark.h"
 #include "mutex.h"
 
@@ -12,7 +12,14 @@ namespace internal {
 class ThreadManager {
  public:
   explicit ThreadManager(int num_threads)
-      : alive_threads_(num_threads), start_stop_barrier_(num_threads) {}
+      : alive_threads_(num_threads), start_stop_barrier_(num_threads) {
+    results.per_thread_complexity_n.resize(num_threads);
+    results.per_thread_counters.resize(num_threads);
+    results.per_thread_cpu_time_used.resize(num_threads);
+    results.per_thread_iterations.resize(num_threads);
+    results.per_thread_manual_time_used.resize(num_threads);
+    results.per_thread_real_time_used.resize(num_threads);
+  }
 
   Mutex& GetBenchmarkMutex() const RETURN_CAPABILITY(benchmark_mutex_) {
     return benchmark_mutex_;
@@ -47,6 +54,13 @@ class ThreadManager {
     std::string error_message_;
     bool has_error_ = false;
     UserCounters counters;
+    std::vector<IterationCount> per_thread_iterations;
+    std::vector<double> per_thread_real_time_used;
+    std::vector<double> per_thread_cpu_time_used;
+    std::vector<double> per_thread_manual_time_used;
+    std::vector<double> per_thread_seconds;
+    std::vector<double> per_thread_complexity_n;
+    std::vector<UserCounters> per_thread_counters;
   };
   GUARDED_BY(GetBenchmarkMutex()) Result results;
 
