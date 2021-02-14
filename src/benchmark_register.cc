@@ -159,6 +159,7 @@ bool BenchmarkFamilies::FindBenchmarks(
     for (auto const& args : family->args_) {
       for (int num_threads : *thread_counts) {
         BenchmarkInstance instance;
+        instance.use_async_io = family->use_async_io_;
         instance.name.function_name = family->name_;
         instance.benchmark = family.get();
         instance.aggregation_report_mode = family->aggregation_report_mode_;
@@ -455,6 +456,22 @@ Benchmark* Benchmark::Complexity(BigOFunc* complexity) {
 Benchmark* Benchmark::ComputeStatistics(std::string name,
                                         StatisticsFunc* statistics) {
   statistics_.emplace_back(name, statistics);
+  return this;
+}
+
+Benchmark* Benchmark::AsyncIO(int t) {
+  CHECK_GT(t, 0);
+  use_async_io_ = true;
+  thread_counts_.push_back(t);
+  return this;
+}
+
+Benchmark* Benchmark::AsyncIORange(int min_threads, int max_threads) {
+  CHECK_GT(min_threads, 0);
+  CHECK_GE(max_threads, min_threads);
+
+  use_async_io_ = true;
+  AddRange(&thread_counts_, min_threads, max_threads, 2);
   return this;
 }
 

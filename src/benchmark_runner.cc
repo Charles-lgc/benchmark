@@ -33,6 +33,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <numeric>
 #include <string>
 #include <thread>
 #include <utility>
@@ -65,7 +66,8 @@ BenchmarkReporter::Run CreateRunReport(
     const benchmark::internal::BenchmarkInstance& b,
     const internal::ThreadManager::Result& results,
     IterationCount memory_iterations,
-    const MemoryManager::Result& memory_result, double seconds,
+    const MemoryManager::Result& memory_result,
+    double seconds,
     int64_t repetition_index) {
   // Create report about this benchmark run.
   BenchmarkReporter::Run report;
@@ -75,24 +77,40 @@ BenchmarkReporter::Run CreateRunReport(
   report.error_message = results.error_message_;
   report.report_label = results.report_label_;
   // This is the total iterations across all threads.
-  report.iterations = results.iterations;
+  if (!b.use_async_io)
+    report.iterations = results.iterations;
+  else
+    report.per_thread_iterations = results.per_thread_iterations;
   report.time_unit = b.time_unit;
   report.threads = b.threads;
   report.repetition_index = repetition_index;
   report.repetitions = b.repetitions;
+  report.use_async_io = b.use_async_io;
 
   if (!report.error_occurred) {
     if (b.use_manual_time) {
-      report.real_accumulated_time = results.manual_time_used;
+      if (!b.use_async_io)
+        report.real_accumulated_time = results.manual_time_used;
+      else
+        report.per_thread_real_time = results.per_thread_manual_time_used;
     } else {
-      report.real_accumulated_time = results.real_time_used;
+      if (!b.use_async_io)
+        report.real_accumulated_time = results.real_time_used;
+      else
+        report.per_thread_real_time = results.per_thread_real_time_used;
     }
-    report.cpu_accumulated_time = results.cpu_time_used;
+    if (!b.use_async_io)
+      report.cpu_accumulated_time = results.cpu_time_used;
+    else
+      report.per_thread_cpu_time = results.per_thread_cpu_time_used;
     report.complexity_n = results.complexity_n;
     report.complexity = b.complexity;
     report.complexity_lambda = b.complexity_lambda;
     report.statistics = b.statistics;
-    report.counters = results.counters;
+    if (!b.use_async_io)
+      report.counters = results.counters;
+    else
+      report.per_thread_counters = results.per_thread_counters;
 
     if (memory_iterations > 0) {
       report.has_memory_result = true;
@@ -103,7 +121,11 @@ BenchmarkReporter::Run CreateRunReport(
       report.max_bytes_used = memory_result.max_bytes_used;
     }
 
-    internal::Finish(&report.counters, results.iterations, seconds, b.threads);
+    if (!b.use_async_io)
+      internal::Finish(&report.counters, results.iterations, seconds, b.threads);
+    else
+      for (int i = 0; i < b.threads; ++i)
+        internal::Finish(&report.per_thread_counters[i], results.per_thread_iterations[i], results.per_thread_seconds[i], 1);
   }
   return report;
 }
@@ -122,12 +144,21 @@ void RunInThread(const BenchmarkInstance* b, IterationCount iters,
   {
     MutexLock l(manager->GetBenchmarkMutex());
     internal::ThreadManager::Result& results = manager->results;
-    results.iterations += st.iterations();
-    results.cpu_time_used += timer.cpu_time_used();
-    results.real_time_used += timer.real_time_used();
-    results.manual_time_used += timer.manual_time_used();
-    results.complexity_n += st.complexity_length_n();
-    internal::Increment(&results.counters, st.counters);
+    if (!b->use_async_io) {
+      results.iterations += st.iterations();
+      results.cpu_time_used += timer.cpu_time_used();
+      results.real_time_used += timer.real_time_used();
+      results.manual_time_used += timer.manual_time_used();
+      results.complexity_n += st.complexity_length_n();
+      internal::Increment(&results.counters, st.counters);
+    } else {
+      results.per_thread_iterations[thread_id] = st.iterations();
+      results.per_thread_cpu_time_used[thread_id] = timer.cpu_time_used();
+      results.per_thread_real_time_used[thread_id] = timer.real_time_used();
+      results.per_thread_manual_time_used[thread_id] = timer.manual_time_used();
+      results.per_thread_complexity_n[thread_id] = st.complexity_length_n();
+      internal::Increment(&results.per_thread_counters[thread_id], st.counters);
+    }
   }
   manager->NotifyThreadComplete();
 }
@@ -228,10 +259,12 @@ class BenchmarkRunner {
     manager.reset();
 
     // Adjust real/manual time stats since they were reported per thread.
-    i.results.real_time_used /= b.threads;
-    i.results.manual_time_used /= b.threads;
-    // If we were measuring whole-process CPU usage, adjust the CPU time too.
-    if (b.measure_process_cpu_time) i.results.cpu_time_used /= b.threads;
+    if (!b.use_async_io) {
+      i.results.real_time_used /= b.threads;
+      i.results.manual_time_used /= b.threads;
+      // If we were measuring whole-process CPU usage, adjust the CPU time too.
+      if (b.measure_process_cpu_time) i.results.cpu_time_used /= b.threads;
+    }
 
     VLOG(2) << "Ran in " << i.results.cpu_time_used << "/"
             << i.results.real_time_used << "\n";
@@ -239,11 +272,23 @@ class BenchmarkRunner {
     // So for how long were we running?
     i.iters = iters;
     // Base decisions off of real time if requested by this benchmark.
-    i.seconds = i.results.cpu_time_used;
-    if (b.use_manual_time) {
-      i.seconds = i.results.manual_time_used;
-    } else if (b.use_real_time) {
-      i.seconds = i.results.real_time_used;
+    if (!b.use_async_io) {
+      i.seconds = i.results.cpu_time_used;
+      if (b.use_manual_time) {
+        i.seconds = i.results.manual_time_used;
+      } else if (b.use_real_time) {
+        i.seconds = i.results.real_time_used;
+      }
+    } else {
+      i.results.per_thread_seconds = i.results.per_thread_cpu_time_used;
+      i.seconds = std::accumulate(i.results.per_thread_cpu_time_used.begin(), i.results.per_thread_cpu_time_used.end(), 0);
+      if (b.use_manual_time) {
+        i.results.per_thread_seconds = i.results.per_thread_manual_time_used;
+        i.seconds = std::accumulate(i.results.per_thread_manual_time_used.begin(), i.results.per_thread_manual_time_used.end(), 0);
+      } else if (b.use_real_time) {
+        i.results.per_thread_seconds = i.results.per_thread_real_time_used;
+        i.seconds = std::accumulate(i.results.per_thread_real_time_used.begin(), i.results.per_thread_real_time_used.end(), 0);
+      }
     }
 
     return i;

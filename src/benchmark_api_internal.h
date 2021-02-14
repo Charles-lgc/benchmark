@@ -25,6 +25,7 @@ struct BenchmarkInstance {
   bool measure_process_cpu_time;
   bool use_real_time;
   bool use_manual_time;
+  bool use_async_io;
   BigO complexity;
   BigOFunc* complexity_lambda;
   UserCounters counters;
